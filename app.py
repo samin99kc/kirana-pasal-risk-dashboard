@@ -298,22 +298,18 @@ with st.sidebar:
     )
     st.write("")
 
-    upload = st.file_uploader("Survey workbook (.xlsx)", type=["xlsx"])
+    upload = st.file_uploader("Upload Excel data (.xlsx)", type=["xlsx"])
     source = upload if upload is not None else DATA_PATH
 
     st.divider()
+    st.markdown("**Step 1 — Choose the prediction target**")
     target_label = st.radio(
-        "Outcome definition",
+        "What should we predict?",
         ["Observed closure", "Owner expectation"],
-        help="The two targets agree on roughly seven shops in ten. They are reported "
-        "separately because expectation and outcome are different constructs.",
+        help="Choose recorded closure or the owner's expectation.",
     )
-    predictor_label = st.radio(
-        "Predictor set",
-        ["All predictors", "Screened predictors"],
-        help="The screened set uses only variables significant at p < .05. Those figures "
-        "are optimistic: the screen was computed on the full sample.",
-    )
+    predictor_label = "All predictors"
+    st.caption("All available risk factors are used automatically.")
 
 try:
     df, X_all, single_vars, derived_vars = load(source)
@@ -347,26 +343,31 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.info(
+    "**Quick start:** Choose the target on the left → open **Risk Factors** → "
+    "check **Models** → use **Threshold** to explore the warning level."
+)
+
 tabs = st.tabs(
-    ["Overview", "Risk factors", "Two targets", "Model comparison", "Threshold explorer"]
+    ["🏠 Home", "🔎 Risk Factors", "↔️ Compare", "🤖 Models", "🎚️ Threshold"]
 )
 
 # ------------------------------------------------------------ overview
 
 with tabs[0]:
-    st.header("Overview")
-    st.caption("What the dataset contains, and the constraint that shapes every result below.")
+    st.header("🏠 Home")
+    st.caption("Start here. See the dataset, outcomes, and main findings.")
 
     resolved = int(df["target_observed"].notna().sum())
     failures = int(df["target_observed"].sum())
 
     c = st.columns(4)
-    c[0].metric("Shop records", f"{len(df)}")
-    c[1].metric("Resolved outcomes", f"{resolved}", f"{len(df) - resolved} unverified",
+    c[0].metric("Total shops", f"{len(df)}")
+    c[1].metric("Known outcomes", f"{resolved}", f"{len(df) - resolved} unverified",
                 delta_color="off")
-    c[2].metric("Observed failures", f"{failures}", f"{failures / resolved:.1%} of resolved",
+    c[2].metric("Failed shops", f"{failures}", f"{failures / resolved:.1%} of resolved",
                 delta_color="off")
-    c[3].metric("Owner-flagged high risk", f"{int(df['target_belief'].sum())}",
+    c[3].metric("Owner-flagged risk", f"{int(df['target_belief'].sum())}",
                 f"{df['target_belief'].mean():.1%} of all", delta_color="off")
 
     st.subheader("The width problem")
@@ -424,11 +425,8 @@ with tabs[0]:
 # -------------------------------------------------------- risk factors
 
 with tabs[1]:
-    st.header("Risk factors")
-    st.caption(
-        "Chi-square tests of independence against the selected target, with Cramér's V as the "
-        "effect size and Benjamini–Hochberg correction for running the tests in bulk."
-    )
+    st.header("🔎 Risk Factors")
+    st.caption("See which shop factors are most strongly associated with the selected outcome.")
 
     n_raw = int(scr["significant_raw"].sum())
     n_bh = int(scr["survives_bh"].sum())
@@ -538,11 +536,8 @@ with tabs[1]:
 # --------------------------------------------------------- two targets
 
 with tabs[2]:
-    st.header("Two targets")
-    st.caption(
-        "The study carries two definitions of failure: what the shop did, and what its owner "
-        "expected. Whoever picks the target decides whose distress the model can see."
-    )
+    st.header("↔️ Compare")
+    st.caption("Compare recorded closure with what shop owners expected.")
 
     ag = ka.agreement(df)
     c = st.columns(4)
@@ -600,12 +595,8 @@ with tabs[2]:
 # ---------------------------------------------------- model comparison
 
 with tabs[3]:
-    st.header("Model comparison")
-    st.caption(
-        f"70:30 stratified split, tuning by grid search inside five-fold cross-validation on the "
-        f"training portion, test set scored once. Currently showing: {target_label.lower()}, "
-        f"{predictor_label.lower()}."
-    )
+    st.header("🤖 Models")
+    st.caption("Compare Logistic Regression, Random Forest, and XGBoost on the test data.")
 
     res = model_out["results"]
     names = list(res)
@@ -687,11 +678,8 @@ with tabs[3]:
 # ------------------------------------------------- threshold explorer
 
 with tabs[4]:
-    st.header("Threshold explorer")
-    st.caption(
-        "The cut-off is not a technical detail. It decides who carries the cost of being wrong, "
-        "and no amount of tuning turns that into a statistical question."
-    )
+    st.header("🎚️ Threshold")
+    st.caption("Choose how sensitive the warning should be. Lower thresholds catch more risky shops but may flag more healthy shops.")
 
     ctrl = st.columns([1, 2])
     model_name = ctrl[0].selectbox("Model", list(model_out["results"]), key="thr_model")
