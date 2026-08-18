@@ -212,6 +212,27 @@ st.markdown(
           background: #2E2721; border: 1px solid #3B322B; border-radius: 8px; }}
       [data-testid="stSidebar"] label p {{ font-size: 0.82rem; font-weight: 500; }}
 
+      /* buttons ----------------------------------------------------- */
+      /* Streamlit's own button colours come from the active theme. When it
+         falls back to dark, the label goes near-black on the espresso fill
+         and the button reads as an empty box. Forced, like the text above. */
+      .stApp .stButton button,
+      .stApp .stDownloadButton button,
+      .stApp [data-testid="stBaseButton-secondary"],
+      .stApp [data-testid="stBaseButton-primary"] {{
+          background: {CARD}; color: {INK} !important; border: 1px solid {LINE};
+          border-radius: 8px; font-weight: 500; }}
+      .stApp .stButton button p,
+      .stApp .stDownloadButton button p,
+      .stApp [data-testid="stBaseButton-secondary"] p,
+      .stApp [data-testid="stBaseButton-primary"] p {{ color: {INK} !important; }}
+      .stApp [data-testid="stBaseButton-primary"] {{
+          background: {BRASS}; border-color: {BRASS}; }}
+      .stApp [data-testid="stBaseButton-primary"],
+      .stApp [data-testid="stBaseButton-primary"] p {{ color: {SHELL} !important; }}
+      .stApp .stButton button:hover,
+      .stApp .stDownloadButton button:hover {{ border-color: {BRASS}; }}
+
       /* tables ------------------------------------------------------ */
       [data-testid="stDataFrame"] {{ border: 1px solid {LINE}; border-radius: 8px; }}
       [data-testid="stExpander"] {{ background: {CARD}; border: 1px solid {LINE};
@@ -1020,50 +1041,56 @@ with tabs[5]:
         "assessment."
     )
 
-    if st.button("Load the scoring models"):
-        st.session_state["scoring_ready"] = True
+    cat_cols, bin_cols = ka.split_column_kinds(X)
 
-    if st.session_state.get("scoring_ready"):
-        bundle = deployment(X, y)
-        cat_cols, bin_cols = ka.split_column_kinds(X)
+    # Levels and defaults come from the data, not from a fitted bundle, so the
+    # form renders instantly and the models are only fitted when a score is
+    # actually asked for.
+    levels = {c: sorted(X[c].astype(str).unique().tolist()) for c in cat_cols}
+    defaults = {c: X[c].astype(str).mode().iat[0] for c in cat_cols}
 
-        record = {}
-        show = cat_cols[:12]
-        cols = st.columns(3)
-        for i, col in enumerate(show):
-            levels = bundle["levels"].get(col, [])
-            if levels:
-                record[col] = cols[i % 3].selectbox(col, levels, key=f"nsp_{col}")
-        if len(cat_cols) > len(show):
-            st.caption(
-                f"{len(cat_cols) - len(show)} further variables are held at "
-                f"“{ka.MISSING_LABEL}”, which is itself a category the models were fitted on."
-            )
-
-        if bin_cols:
-            chosen = st.multiselect("Multi-response options that apply", bin_cols)
-            for col in bin_cols:
-                record[col] = int(col in chosen)
-
-        if st.button("Score this shop", type="primary"):
-            out = ka.predict_new_shop(bundle, record)
-            if out["unmatched"]:
-                st.warning(
-                    "No fitted category matched, so these variables contributed nothing: "
-                    + "; ".join(out["unmatched"])
+    # Every variable gets an input. Leaving some of them to default silently
+    # meant most of the shop's profile contributed nothing to the score while
+    # the result still looked like an answer.
+    record = {}
+    PER_GROUP = 9
+    groups = [cat_cols[i:i + PER_GROUP] for i in range(0, len(cat_cols), PER_GROUP)]
+    for gi, group in enumerate(groups):
+        label = f"Shop details ({gi * PER_GROUP + 1}–{gi * PER_GROUP + len(group)} of {len(cat_cols)})"
+        with st.expander(label, expanded=(gi == 0)):
+            cols = st.columns(3)
+            for i, col in enumerate(group):
+                opts = levels[col]
+                record[col] = cols[i % 3].selectbox(
+                    col, opts, index=opts.index(defaults[col]), key=f"nsp_{col}"
                 )
-            mcols = st.columns(len(out["probabilities"]))
-            for (name, p), col in zip(out["probabilities"].items(), mcols):
-                thr = out["thresholds"].get(name, 0.5)
-                col.metric(name, f"{p:.1%}",
-                           "flagged" if p >= thr else "not flagged", delta_color="off")
-            finding(
-                "These are ranking scores, not calibrated probabilities. A shop at 62% is "
-                "ranked above one at 41%; neither figure means a six-in-ten chance of closing. "
-                "Calibration would need a larger sample and a held-out calibration set."
+
+    if bin_cols:
+        with st.expander("Multi-response options that apply", expanded=False):
+            chosen = st.multiselect("Select all that apply", bin_cols, key="nsp_multi")
+        for col in bin_cols:
+            record[col] = int(col in chosen)
+
+    st.caption("Every field starts at the most common answer in the survey.")
+
+    if st.button("Score this shop", type="primary"):
+        bundle = deployment(X, y)
+        out = ka.predict_new_shop(bundle, record)
+        if out["unmatched"]:
+            st.warning(
+                "These answers were pooled or unseen at fit time and contributed nothing: "
+                + "; ".join(out["unmatched"])
             )
-    else:
-        st.info("Fitting the scoring models takes a few seconds — press the button when ready.")
+        mcols = st.columns(len(out["probabilities"]))
+        for (name, p), col in zip(out["probabilities"].items(), mcols):
+            thr = out["thresholds"].get(name, 0.5)
+            col.metric(name, f"{p:.1%}",
+                       "flagged" if p >= thr else "not flagged", delta_color="off")
+        finding(
+            "These are ranking scores, not calibrated probabilities. A shop at 62% is "
+            "ranked above one at 41%; neither figure means a six-in-ten chance of closing. "
+            "Calibration would need a larger sample and a held-out calibration set."
+        )
 
 # ---------------------------------------------------------------- methods
 
