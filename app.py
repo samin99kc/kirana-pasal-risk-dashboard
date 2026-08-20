@@ -31,6 +31,49 @@ TAB_ICONS = True
 
 SMALL_N = 10  # below this, a category percentage is not worth reading
 
+# Set False for the public deployment. A hosted app inviting uploads of shop
+# financials is the purpose-drift risk this study names in its own ethical
+# evaluation; the control belongs in a local run, not on an open URL.
+ALLOW_UPLOAD = False
+
+# ---------------------------------------------------- reported specification
+#
+# The configuration the thesis tables were produced under. The dashboard's own
+# defaults differ deliberately — pooling applied to the models, repeats at ten,
+# no variable pre-selection — because each is the better analysis. This constant
+# exists so the reported figures stay one click away and any divergence is named
+# on screen rather than left for a reader to discover.
+
+REPORTED_SPEC = {
+    "target_label": "Observed closure",
+    "unresolved_fail": False,
+    "merge_rare": False,   # Table 25.1 is 266 unpooled encoded columns
+    "yates": False,
+    "n_repeats": 1,        # every reported figure is the seed-42 split
+}
+
+SPEC_LABELS = {
+    "target_label": "prediction target",
+    "unresolved_fail": "treatment of unverified shops",
+    "merge_rare": "rare-category pooling",
+    "yates": "Yates' correction",
+    "n_repeats": "number of splits",
+}
+
+
+def _apply_reported_spec():
+    """Restore the configuration the thesis tables were produced under."""
+    for key, value in REPORTED_SPEC.items():
+        st.session_state[key] = value
+
+
+def _spec_divergences():
+    """Settings currently differing from the reported analysis, named in prose."""
+    return [
+        SPEC_LABELS[k] for k, v in REPORTED_SPEC.items()
+        if st.session_state.get(k, v) != v
+    ]
+
 # ------------------------------------------------------------- palette
 #
 # Colour carries one meaning throughout: red is a shop that failed or was
@@ -86,6 +129,7 @@ def _stretch(fn):
 
 STRETCH = _stretch(st.dataframe)
 CHART_STRETCH = _stretch(st.plotly_chart)
+BUTTON_STRETCH = _stretch(st.button)
 PLOTLY_CONFIG = {"displayModeBar": False, "displaylogo": False, "responsive": True}
 
 
@@ -390,7 +434,23 @@ with st.sidebar:
     )
     st.write("")
 
-    upload = st.file_uploader("Upload Excel data (.xlsx)", type=["xlsx"])
+    # Disabled on the public build. The ethical evaluation argues purpose
+    # limitation has to be designed in rather than asserted, and an open URL
+    # accepting workbooks of shop financials is exactly the drift it describes.
+    upload = (
+        st.file_uploader("Upload Excel data (.xlsx)", type=["xlsx"])
+        if ALLOW_UPLOAD else None
+    )
+    if ALLOW_UPLOAD:
+        st.caption(
+            "Held in memory for this session only, never written to disk or retained. "
+            "Do not upload records identifying a real shop or owner."
+        )
+    else:
+        st.caption(
+            "Upload is disabled on the deployed build. The bundled synthetic workbook "
+            "is the only data this app reads."
+        )
     source = upload if upload is not None else DATA_PATH
 
     sheet_names = ka.list_sheets(source)
@@ -408,6 +468,7 @@ with st.sidebar:
     target_label = st.radio(
         "What should we predict?",
         ["Observed closure", "Owner expectation"],
+        key="target_label",
         help="Choose recorded closure or the owner's expectation.",
     )
     st.caption("All available risk factors are used — no variable pre-selection.")
@@ -422,26 +483,43 @@ with st.sidebar:
         unresolved_fail = st.checkbox(
             "Count unverified shops as failures",
             value=False,
+            key="unresolved_fail",
             help="A shop that could not be traced is plausibly one that disappeared. "
             "Dropping those rows assumes it is not.",
         )
         merge_rare = st.checkbox(
             f"Pool categories with fewer than {ka.MIN_CATEGORY_N} shops",
             value=True,
+            key="merge_rare",
             help="Applied to the significance tests either way. Applying it to the "
             "models too stops the encoded matrix carrying a column per two-shop category.",
         )
         yates = st.checkbox(
             "Yates' continuity correction",
             value=False,
+            key="yates",
             help="Off by default: it deflates χ² on 2×2 tables and the same χ² is the "
             "numerator of the effect size.",
         )
         n_repeats = st.select_slider(
             "Repeated train/test splits", options=[1, 5, 10, 20], value=10,
+            key="n_repeats",
             help="More repeats give a better read on how much of any score is the "
             "luck of one split. Slower.",
         )
+
+    st.divider()
+    st.button(
+        "Restore reported specification",
+        on_click=_apply_reported_spec,
+        help="Sets every control back to the configuration the thesis tables were "
+             "produced under, so the reported figures can be reproduced directly.",
+        **BUTTON_STRETCH,
+    )
+    st.caption(
+        "The defaults above are stricter than the reported analysis in places. "
+        "This restores the reported one."
+    )
 
 try:
     df, X_all, single_vars, derived_vars = load(source, sheet, unresolved_fail)
@@ -470,14 +548,16 @@ names = list(res)
 # ------------------------------------------------------------- masthead
 
 src_name = getattr(upload, "name", DATA_PATH)
+divergences = _spec_divergences()
+
 st.markdown(
     f"""
     <div class='topbar'>
       <div><b>Kirana Pasal</b> &nbsp;/&nbsp; {len(df)} records · {target_label.lower()}</div>
-      <div class='src'>{src_name} · sheet “{sheet}” · static survey extract</div>
+      <div class='src'>{src_name} · sheet “{sheet}” · synthetic survey extract</div>
     </div>
     <div class='masthead'>
-      <div class='eyebrow'>Method demonstration</div>
+      <div class='eyebrow'>Method demonstration · synthetic data · not for use on real shops</div>
       <h1>Predicting failure risk in kirana pasals</h1>
       <p>Currently predicting <b>{target_label.lower()}</b> from all
       {X.shape[1]} recorded factors. Change the target in the sidebar and every
@@ -486,6 +566,22 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# Which specification is on screen is the first thing a reader needs, because
+# the defaults here are not the ones the reported tables were produced under.
+if divergences:
+    st.warning(
+        "**Not the reported specification.** These settings differ from the "
+        "configuration the thesis tables were produced under: "
+        + ", ".join(divergences)
+        + ". Figures below will not match the reported tables. Use **Restore "
+        "reported specification** in the sidebar to reproduce them."
+    )
+else:
+    st.success(
+        "**Reported specification.** Every control is set to the configuration the "
+        "thesis tables were produced under, so the figures below are the reported ones."
+    )
 
 st.info(
     "**Quick start:** choose the target on the left → open **Risk Factors** for what "
@@ -1041,56 +1137,88 @@ with tabs[5]:
         "assessment."
     )
 
-    cat_cols, bin_cols = ka.split_column_kinds(X)
+    # The study concludes that this framework cannot support a decision about an
+    # individual shop. A scorer reachable in one click from a public URL
+    # contradicts that in the build even while the prose repeats it, so the form
+    # does not render until the reader has said out loud what it is.
+    st.warning(
+        "**This tab scores one shop, and the study concludes that it should not be "
+        "used to.** Test ROC-AUC on the reported specification sits close to chance. "
+        "The form exists to demonstrate the pipeline end to end, and to show what a "
+        "system like this would ask an owner to disclose \u2014 not to assess a business."
+    )
+    ack = st.checkbox(
+        "I understand this is a method demonstration on synthetic data, and not a credit "
+        "assessment, screening tool, or basis for any decision about a real shop.",
+        key="score_ack",
+    )
 
-    # Levels and defaults come from the data, not from a fitted bundle, so the
-    # form renders instantly and the models are only fitted when a score is
-    # actually asked for.
-    levels = {c: sorted(X[c].astype(str).unique().tolist()) for c in cat_cols}
-    defaults = {c: X[c].astype(str).mode().iat[0] for c in cat_cols}
+    if not ack:
+        st.info("Tick the box above to open the form.")
+    else:
+        cat_cols, bin_cols = ka.split_column_kinds(X)
 
-    # Every variable gets an input. Leaving some of them to default silently
-    # meant most of the shop's profile contributed nothing to the score while
-    # the result still looked like an answer.
-    record = {}
-    PER_GROUP = 9
-    groups = [cat_cols[i:i + PER_GROUP] for i in range(0, len(cat_cols), PER_GROUP)]
-    for gi, group in enumerate(groups):
-        label = f"Shop details ({gi * PER_GROUP + 1}–{gi * PER_GROUP + len(group)} of {len(cat_cols)})"
-        with st.expander(label, expanded=(gi == 0)):
-            cols = st.columns(3)
-            for i, col in enumerate(group):
-                opts = levels[col]
-                record[col] = cols[i % 3].selectbox(
-                    col, opts, index=opts.index(defaults[col]), key=f"nsp_{col}"
-                )
+        # Levels and defaults come from the data, not from a fitted bundle, so the
+        # form renders instantly and the models are only fitted when a score is
+        # actually asked for.
+        levels = {c: sorted(X[c].astype(str).unique().tolist()) for c in cat_cols}
+        defaults = {c: X[c].astype(str).mode().iat[0] for c in cat_cols}
 
-    if bin_cols:
-        with st.expander("Multi-response options that apply", expanded=False):
-            chosen = st.multiselect("Select all that apply", bin_cols, key="nsp_multi")
-        for col in bin_cols:
-            record[col] = int(col in chosen)
-
-    st.caption("Every field starts at the most common answer in the survey.")
-
-    if st.button("Score this shop", type="primary"):
-        bundle = deployment(X, y)
-        out = ka.predict_new_shop(bundle, record)
-        if out["unmatched"]:
-            st.warning(
-                "These answers were pooled or unseen at fit time and contributed nothing: "
-                + "; ".join(out["unmatched"])
+        # Every variable gets an input. Leaving some of them to default silently
+        # meant most of the shop's profile contributed nothing to the score while
+        # the result still looked like an answer.
+        record = {}
+        PER_GROUP = 9
+        groups = [cat_cols[i:i + PER_GROUP] for i in range(0, len(cat_cols), PER_GROUP)]
+        for gi, group in enumerate(groups):
+            label = (
+                f"Shop details ({gi * PER_GROUP + 1}\u2013"
+                f"{gi * PER_GROUP + len(group)} of {len(cat_cols)})"
             )
-        mcols = st.columns(len(out["probabilities"]))
-        for (name, p), col in zip(out["probabilities"].items(), mcols):
-            thr = out["thresholds"].get(name, 0.5)
-            col.metric(name, f"{p:.1%}",
-                       "flagged" if p >= thr else "not flagged", delta_color="off")
-        finding(
-            "These are ranking scores, not calibrated probabilities. A shop at 62% is "
-            "ranked above one at 41%; neither figure means a six-in-ten chance of closing. "
-            "Calibration would need a larger sample and a held-out calibration set."
+            with st.expander(label, expanded=(gi == 0)):
+                cols = st.columns(3)
+                for i, col in enumerate(group):
+                    opts = levels[col]
+                    record[col] = cols[i % 3].selectbox(
+                        col, opts, index=opts.index(defaults[col]), key=f"nsp_{col}"
+                    )
+
+        if bin_cols:
+            with st.expander("Multi-response options that apply", expanded=False):
+                chosen = st.multiselect("Select all that apply", bin_cols, key="nsp_multi")
+            for col in bin_cols:
+                record[col] = int(col in chosen)
+
+        note(
+            f"Every field starts at the most common answer in the survey. The length of "
+            f"this form is itself a finding: {len(cat_cols) + len(bin_cols)} disclosures, "
+            "and the most informative of them \u2014 working capital, missed instalments, "
+            "household shocks \u2014 are the ones an owner has most reason to protect. In a "
+            "kirana pasal, household and business finance are rarely separate, so shop "
+            "data is household data."
         )
+
+        if st.button("Score this shop", type="primary"):
+            bundle = deployment(X, y)
+            out = ka.predict_new_shop(bundle, record)
+            if out["unmatched"]:
+                st.warning(
+                    "These answers were pooled or unseen at fit time and contributed nothing: "
+                    + "; ".join(out["unmatched"])
+                )
+            mcols = st.columns(len(out["probabilities"]))
+            for (name, p), col in zip(out["probabilities"].items(), mcols):
+                thr = out["thresholds"].get(name, 0.5)
+                col.metric(name, f"{p:.1%}",
+                           "flagged" if p >= thr else "not flagged", delta_color="off")
+            finding(
+                "These are ranking scores, not calibrated probabilities. A shop at 62% is "
+                "ranked above one at 41%; neither figure means a six-in-ten chance of closing. "
+                "Calibration would need a larger sample and a held-out calibration set. "
+                "Three models are shown rather than one verdict on purpose: where they "
+                "disagree, the disagreement is the result."
+            )
+
 
 # ---------------------------------------------------------------- methods
 
@@ -1124,7 +1252,11 @@ applied across all {len(scr)} tests.
 **Models.** 70:30 stratified split; grid search inside {model_out['n_splits']}-fold
 stratified cross-validation on the training portion; test set scored once; repeated across
 {model_out['n_repeats']} seeds. Class imbalance handled by reweighting rather than
-resampling. Thresholds selected on out-of-fold training predictions. Seed {ka.SEED}.
+resampling. Thresholds selected on out-of-fold training predictions as the
+highest-precision cut-off still reaching 70% recall. This differs from the thesis, which
+selected for F1 on the same folds; the rule here targets the early-warning use directly
+rather than balancing the two errors equally, so its confusion matrices are not identical
+to the reported ones. Seed {ka.SEED}.
 
 **Known limitations.**
 1. Complete-case analysis on an outcome whose missingness is plausibly informative — an
@@ -1138,6 +1270,27 @@ resampling. Thresholds selected on out-of-fold training predictions. Seed {ka.SE
 5. Effect sizes are small throughout, and the reweighting makes 0.50 a non-neutral,
    cross-model-incomparable cut-off.
     """)
+
+    st.divider()
+    st.markdown(
+        """
+**Correspondence with the thesis.** The defaults here are stricter than the reported
+analysis in three places, each deliberate.
+
+1. **No variable pre-selection.** The thesis reports both the full and the
+   chi-square-reduced predictor sets, and states that the reduced figures are optimistic
+   because the screen saw the full sample. This dashboard implements the correction rather
+   than the compromise: every predictor, always.
+2. **Repeated splits.** The thesis reports a single seed-42 split. The dashboard shows the
+   distribution that number was drawn from, which is the honest uncertainty on it.
+3. **Rare-category pooling applied to the models**, not only to the significance tests,
+   which lowers the encoded column count below the reported 266.
+
+A fourth difference is the threshold rule, described above. Use **Restore reported
+specification** in the sidebar to set the first three back and reproduce the reported
+tables directly.
+        """
+    )
 
     with st.expander("Environment"):
         import sklearn
